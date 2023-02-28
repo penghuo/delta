@@ -65,7 +65,9 @@ case class DeltaTableV2(
   private lazy val (rootPath, partitionFilters, timeTravelByPath) = {
     if (catalogTable.isDefined) {
       // Fast path for reducing path munging overhead
-      (new Path(catalogTable.get.location), Nil, None)
+      val loc = CatalogUtils.stringToURI(catalogTable.get.properties
+        .getOrElse("log.path", catalogTable.get.location.getPath))
+      (new Path(loc), Nil, None)
     } else {
       DeltaDataSource.parsePathIdentifier(spark, path.toString, options)
     }

@@ -16,13 +16,11 @@
 
 package org.apache.spark.sql.delta
 
-import org.apache.spark.sql.delta.metering.DeltaLogging
-import org.apache.spark.sql.delta.sources.DeltaSourceUtils
 import org.apache.hadoop.fs.Path
-
-import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.delta.metering.DeltaLogging
+import org.apache.spark.sql.delta.sources.DeltaSourceUtilsWriteIntoDelta
+import org.apache.spark.sql.{AnalysisException, SparkSession}
 
 /**
  * An identifier for a Delta table containing one of the path or the table identifier.
@@ -38,7 +36,8 @@ case class DeltaTableIdentifier(
 
   def getPath(spark: SparkSession): Path = {
     path.map(new Path(_)).getOrElse {
-      new Path(spark.sessionState.catalog.getTableMetadata(table.get).location)
+      val metadata = spark.sessionState.catalog.getTableMetadata(table.get)
+      metadata.properties.get("log.path").map(new Path(_)).getOrElse(new Path(metadata.location))
     }
   }
 

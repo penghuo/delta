@@ -95,7 +95,8 @@ case class CreateDeltaTableCommand(
 
     val isManagedTable = tableWithLocation.tableType == CatalogTableType.MANAGED
     val tableLocation = new Path(tableWithLocation.location)
-    val deltaLog = DeltaLog.forTable(sparkSession, tableLocation)
+    val logPath = table.properties.get("log.path").map(new Path(_))
+    val deltaLog = DeltaLog.forTable(sparkSession, logPath.getOrElse(tableLocation))
     val hadoopConf = deltaLog.newDeltaHadoopConf()
     val fs = tableLocation.getFileSystem(hadoopConf)
     val options = new DeltaOptions(table.storage.properties, sparkSession.sessionState.conf)
@@ -408,7 +409,6 @@ case class CreateDeltaTableCommand(
 
     table.copy(
       schema = new StructType(),
-      properties = Map.empty,
       partitionColumnNames = Nil,
       // Remove write specific options when updating the catalog
       storage = storageProps,

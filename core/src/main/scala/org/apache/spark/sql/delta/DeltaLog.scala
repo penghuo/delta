@@ -643,7 +643,12 @@ object DeltaLog extends DeltaLogging {
     if (DeltaTableIdentifier.isDeltaPath(spark, tableName)) {
       forTable(spark, new Path(tableName.table))
     } else {
-      forTable(spark, spark.sessionState.catalog.getTableMetadata(tableName), clock)
+      val metadata = spark.sessionState.catalog.getTableMetadata(tableName)
+      val logPath = metadata.properties.get("log.path")
+        .map(new Path(_)).getOrElse(new Path(metadata.location))
+      logInfo(metadata.toString())
+      logInfo(logPath.toString)
+      forTable(spark, logPath, clock)
     }
   }
 
