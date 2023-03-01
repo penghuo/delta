@@ -20,34 +20,31 @@ import java.util
 import java.util.Locale
 
 // scalastyle:off import.ordering.noEmptyLine
-import scala.collection.JavaConverters._
-import scala.collection.mutable
-
-import org.apache.spark.sql.delta.{DeltaConfigs, DeltaErrors, DeltaTableUtils}
-import org.apache.spark.sql.delta.{DeltaLog, DeltaOptions}
-import org.apache.spark.sql.delta.DeltaTableIdentifier.gluePermissionError
-import org.apache.spark.sql.delta.commands.{AlterTableAddColumnsDeltaCommand, AlterTableChangeColumnDeltaCommand, AlterTableSetLocationDeltaCommand, AlterTableSetPropertiesDeltaCommand, AlterTableUnsetPropertiesDeltaCommand, CreateDeltaTableCommand, TableCreationModes}
-import org.apache.spark.sql.delta.commands.{AlterTableAddConstraintDeltaCommand, AlterTableDropConstraintDeltaCommand, WriteIntoDelta}
-import org.apache.spark.sql.delta.constraints.{AddConstraint, DropConstraint}
-import org.apache.spark.sql.delta.sources.{DeltaSourceUtils, DeltaSQLConf}
 import org.apache.hadoop.fs.Path
-
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{AnalysisException, DataFrame, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.{NoSuchDatabaseException, NoSuchNamespaceException, NoSuchTableException, UnresolvedAttribute}
-import org.apache.spark.sql.catalyst.catalog.{BucketSpec, CatalogTable, CatalogTableType, CatalogUtils, SessionCatalog}
+import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, QualifiedColType}
-import org.apache.spark.sql.connector.catalog.{DelegatingCatalogExtension, Identifier, StagedTable, StagingTableCatalog, SupportsWrite, Table, TableCapability, TableCatalog, TableChange, V1Table}
 import org.apache.spark.sql.connector.catalog.TableCapability._
 import org.apache.spark.sql.connector.catalog.TableChange._
+import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.expressions.{BucketTransform, FieldReference, IdentityTransform, Transform}
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, V1WriteBuilder, WriteBuilder}
-import org.apache.spark.sql.execution.datasources.{DataSource, PartitioningUtils}
+import org.apache.spark.sql.delta.DeltaTableIdentifier.gluePermissionError
+import org.apache.spark.sql.delta.commands._
+import org.apache.spark.sql.delta.constraints.{AddConstraint, DropConstraint}
+import org.apache.spark.sql.delta.sources.{DeltaSQLConf, DeltaSourceUtils}
+import org.apache.spark.sql.delta.{DeltaConfigs, DeltaErrors, DeltaLog, DeltaOptions, DeltaTableUtils}
 import org.apache.spark.sql.execution.datasources.parquet.ParquetSchemaConverter
+import org.apache.spark.sql.execution.datasources.{DataSource, PartitioningUtils}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources.InsertableRelation
-import org.apache.spark.sql.types.{IntegerType, MetadataBuilder, StructField, StructType}
+import org.apache.spark.sql.types.{StructField, StructType}
+import org.apache.spark.sql.{AnalysisException, DataFrame, SparkSession}
+
+import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 
 /**
@@ -90,7 +87,7 @@ class DeltaCatalog extends DelegatingCatalogExtension
       case TableCatalog.PROP_COMMENT => false
       case TableCatalog.PROP_OWNER => false
       // TODO: use TableCatalog.PROP_EXTERNAL after Spark 3.1.0 is released.
-      case "external" => false
+//      case "external" => false
       case "path" => false
       case _ => true
     }

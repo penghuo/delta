@@ -17,19 +17,19 @@
 package org.apache.spark.sql.delta.commands
 
 // scalastyle:off import.ordering.noEmptyLine
-import org.apache.spark.sql.delta._
-import org.apache.spark.sql.delta.actions.{Action, Metadata}
-import org.apache.spark.sql.delta.metering.DeltaLogging
-import org.apache.spark.sql.delta.schema.SchemaUtils
-import org.apache.spark.sql.delta.sources.DeltaSQLConf
+import io.delta.tables.execution.DeltaCreateExternalTable
 import org.apache.hadoop.fs.{FileSystem, Path}
-
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.CannotReplaceMissingTableException
 import org.apache.spark.sql.catalyst.catalog.{CatalogTable, CatalogTableType}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.Identifier
+import org.apache.spark.sql.delta._
+import org.apache.spark.sql.delta.actions.Metadata
+import org.apache.spark.sql.delta.metering.DeltaLogging
+import org.apache.spark.sql.delta.schema.SchemaUtils
+import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types.StructType
 
@@ -165,7 +165,8 @@ case class CreateDeltaTableCommand(
           // This is either a new table, or, we never defined the schema of the table. While it is
           // unexpected that `txn.metadata.schema` to be empty when txn.readVersion >= 0, we still
           // guard against it, in case of checkpoint corruption bugs.
-          val noExistingMetadata = txn.readVersion == -1 || txn.metadata.schema.isEmpty
+          val noExistingMetadata = (txn.readVersion == -1 || txn.metadata.schema.isEmpty) &&
+            !table.properties.contains("external")
           if (noExistingMetadata) {
             assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
             assertPathEmpty(sparkSession, tableWithLocation)
@@ -177,7 +178,7 @@ case class CreateDeltaTableCommand(
             val op = getOperation(newMetadata, isManagedTable, None)
             txn.commit(Nil, op)
           } else {
-            verifyTableMetadata(txn, tableWithLocation)
+            DeltaCreateExternalTable.createExternalTable(sparkSession, table, tableLocation)
           }
         }
         // We are defining a table using the Create or Replace Table statements.
