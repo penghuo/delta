@@ -17,7 +17,6 @@
 package org.apache.spark.sql.delta.commands
 
 // scalastyle:off import.ordering.noEmptyLine
-import io.delta.tables.execution.DeltaCreateExternalTable
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.CannotReplaceMissingTableException
@@ -26,12 +25,18 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.delta._
-import org.apache.spark.sql.delta.actions.Metadata
+import org.apache.spark.sql.delta.actions.{AddFile, Metadata}
 import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.spark.sql.delta.schema.SchemaUtils
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
+import org.apache.spark.sql.delta.util.{DeltaFileOperations, SerializableFileStatus}
 import org.apache.spark.sql.execution.command.RunnableCommand
+import org.apache.spark.sql.functions.input_file_name
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.util.SerializableConfiguration
+
+import java.io.Closeable
+import scala.collection.JavaConverters.asScalaIteratorConverter
 
 /**
  * Single entry point for all write or declaration operations for Delta tables accessed through
@@ -54,6 +59,7 @@ case class CreateDeltaTableCommand(
     tableByPath: Boolean = false,
     override val output: Seq[Attribute] = Nil)
   extends RunnableCommand
+  with DeltaCommand
   with DeltaLogging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -178,7 +184,25 @@ case class CreateDeltaTableCommand(
             val op = getOperation(newMetadata, isManagedTable, None)
             txn.commit(Nil, op)
           } else {
-            DeltaCreateExternalTable.createExternalTable(sparkSession, table, tableLocation)
+            assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
+            // This is a user provided schema.
+            // Doesn't come from a query, Follow nullability invariants.
+            val newMetadata = getProvidedMetadata(table, table.schema.json)
+            txn.updateMetadataForNewTable(newMetadata)
+
+            val op = getOperation(newMetadata, isManagedTable, None)
+            txn.commit(Nil, op)
+
+            val convertTarget = ConvertTarget(table, tableLocation, Map.empty[String, String])
+            if ("false".equalsIgnoreCase(table.properties.getOrElse("auto_refresh", "false"))) {
+              logWarning(s"one time refresh")
+              deltaLog.withNewTransaction { t =>
+                performConvert(sparkSession, t, convertTarget, Option.empty)
+              }
+            } else {
+              logWarning(s"auto refresh")
+              autoRefresh(sparkSession, deltaLog, table, convertTarget)
+            }
           }
         }
         // We are defining a table using the Create or Replace Table statements.
@@ -429,6 +453,211 @@ case class CreateDeltaTableCommand(
   }
 
   // TODO: remove when the new Spark version is releases that has the withNewChildInternal method
+
+  // Create external table. TODO: code need to be refactored.
+
+  private def autoRefresh(
+    spark: SparkSession,
+    deltaLog: DeltaLog,
+    table: CatalogTable,
+    convertProperties: ConvertTarget
+  ): Unit = {
+    def myFunc(batchDF: DataFrame, batchID: Long): Unit = {
+      deltaLog.withNewTransaction { txn => {
+        val paths = batchDF.collect().map(row => new Path(row(0).toString))
+        logWarning(s"refresh with files: $paths")
+        performConvert(spark, txn, convertProperties, Option(paths))
+      }
+      }
+    }
+    val streamDF = spark.readStream
+      .schema(table.schema)
+      .format("parquet")
+      .option("path", convertProperties.targetDir.toString)
+      .load()
+    streamDF
+      .select(input_file_name())
+      .writeStream
+      .foreachBatch(myFunc _)
+      .start()
+  }
+
+  /**
+   * Given the file manifest, create corresponding AddFile actions for the
+   * entire list of files.
+   */
+  protected def createDeltaActions(
+    spark: SparkSession,
+    manifest: FileManifest,
+    txn: OptimisticTransaction,
+    fs: FileSystem
+  ): Iterator[AddFile] = {
+    val statsBatchSize =
+      conf.getConf(DeltaSQLConf.DELTA_IMPORT_BATCH_SIZE_STATS_COLLECTION)
+    manifest.getFiles.grouped(statsBatchSize).flatMap { batch =>
+      val adds = batch.map(createAddFile(_, txn.deltaLog.dataPath, fs))
+      adds.toIterator
+    }
+  }
+
+  /**
+   * Converts the given table to a Delta table. First gets the file manifest
+   * for the table. Then in the first pass, it infers the schema of the table.
+   * Then in the second pass, it generates the relevant Actions for Delta's
+   * transaction log, namely the AddFile actions for each file in the manifest.
+   * Once a commit is made, updates an external catalog, e.g. Hive MetaStore,
+   * if this table was referenced through a table in a catalog.
+   */
+  private def performConvert(
+    spark: SparkSession,
+    txn: OptimisticTransaction,
+    convertProperties: ConvertTarget,
+    files: Option[Array[Path]]
+  ): Seq[Row] =
+    recordDeltaOperation(txn.deltaLog, "delta.convert") {
+
+      txn.deltaLog.ensureLogDirectoryExist()
+      val targetPath = convertProperties.targetDir
+      val sessionHadoopConf = spark.sessionState.newHadoopConf()
+      val fs = targetPath.getFileSystem(sessionHadoopConf)
+      val qualifiedPath = fs.makeQualified(targetPath)
+      val qualifiedDir = qualifiedPath.toString
+      if (!fs.exists(qualifiedPath)) {
+        throw DeltaErrors.pathNotExistsException(qualifiedDir)
+      }
+      val serializableConfiguration =
+        new SerializableConfiguration(sessionHadoopConf)
+
+      val manifest = files.map(new ProvidedFileManifest(qualifiedDir, fs, _))
+        .getOrElse(new ManualListingFileManifest(spark, qualifiedDir, serializableConfiguration))
+
+      try {
+        val initialList = manifest.getFiles
+        if (!initialList.hasNext) {
+          throw DeltaErrors.emptyDirectoryException(qualifiedDir)
+        }
+
+        val numFiles = initialList.size
+
+        val addFilesIter = createDeltaActions(spark, manifest, txn, fs)
+        val metrics = Map[String, String](
+          "numConvertedFiles" -> numFiles.toString
+        )
+
+        commitLarge(
+          spark,
+          txn,
+          Iterator.single(txn.protocol) ++ addFilesIter,
+          getOperation(numFiles, convertProperties),
+          getContext,
+          metrics
+        )
+      } finally {
+        manifest.close()
+      }
+
+      Seq.empty[Row]
+    }
+
+  protected def createAddFile(
+    file: SerializableFileStatus,
+    basePath: Path,
+    fs: FileSystem
+  ): AddFile = {
+    val path = file.getPath
+
+    val pathStrForAddFile = if (true) {
+      val relativePath =
+        DeltaFileOperations.tryRelativizePath(fs, basePath, path)
+      assert(
+        !relativePath.isAbsolute,
+        s"Fail to relativize path $path against base path $basePath."
+      )
+      relativePath.toUri.toString
+    } else {
+      path.toUri.toString
+    }
+
+    AddFile(
+      pathStrForAddFile,
+      Map[String, String](),
+      file.length,
+      file.modificationTime,
+      dataChange = true
+    )
+  }
+
+  protected def getContext: Map[String, String] = {
+    Map.empty
+  }
+
+  /** Get the operation to store in the commit message. */
+  protected def getOperation(
+    numFilesConverted: Long,
+    convertProperties: ConvertTarget
+  ): DeltaOperations.Operation = {
+    DeltaOperations.Write(
+      SaveMode.Append,
+      Option.empty,
+      Option.empty, Option.empty
+    )
+  }
+
+  protected case class ConvertTarget(
+    catalogTable: CatalogTable,
+    targetDir: Path,
+    properties: Map[String, String]
+  )
+
+  /** An interface for providing an iterator of files for a table. */
+  protected trait FileManifest extends Closeable {
+
+    /** The base path of a table. Should be a qualified, normalized path. */
+    val basePath: String
+
+    /** Return the active files for a table */
+    def getFiles: Iterator[SerializableFileStatus]
+  }
+
+  /** A file manifest generated through recursively listing a base path. */
+  class ManualListingFileManifest(
+    spark: SparkSession,
+    override val basePath: String,
+    serializableConf: SerializableConfiguration
+  ) extends FileManifest {
+
+    protected def doList(): Dataset[SerializableFileStatus] = {
+      val conf = spark.sparkContext.broadcast(serializableConf)
+      DeltaFileOperations
+        .recursiveListDirs(spark, Seq(basePath), conf)
+        .where("!isDir")
+    }
+
+    private lazy val list: Dataset[SerializableFileStatus] = {
+      val ds = doList()
+      ds.cache()
+      ds
+    }
+
+    override def getFiles: Iterator[SerializableFileStatus] =
+      list.toLocalIterator().asScala
+
+    override def close(): Unit = list.unpersist()
+  }
+
+  /**
+   * A file mainfest generated from provided file list
+   */
+  class ProvidedFileManifest(
+    override val basePath: String,
+    fs: FileSystem,
+    files: Array[Path]
+  ) extends FileManifest {
+    override def getFiles: Iterator[SerializableFileStatus] =
+      fs.listStatus(files).map(fs => SerializableFileStatus.fromStatus(fs)).toIterator
+
+    override def close(): Unit = {}
+  }
 }
 
 object TableCreationModes {
