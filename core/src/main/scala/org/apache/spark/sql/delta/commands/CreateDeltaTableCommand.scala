@@ -463,13 +463,29 @@ case class CreateDeltaTableCommand(
     convertProperties: ConvertTarget
   ): Unit = {
     def myFunc(batchDF: DataFrame, batchID: Long): Unit = {
-      deltaLog.withNewTransaction { txn => {
-        val paths = batchDF.collect().map(row => new Path(row(0).toString))
-        logWarning(s"refresh with files: $paths")
-        performConvert(spark, txn, convertProperties, Option(paths))
+        deltaLog.withNewTransaction { txn => {
+          logWarning(s"=== Refresh with files ===")
+          val paths = batchDF.collect().map(row => {
+            val path = row(0).toString
+            logWarning(s"New file: $path")
+            new Path(path)
+          })
+          performConvert(spark, txn, convertProperties, Option(paths))
+        }
       }
+
+      /**
+       * TODO: refresh all index/MV in current Delta table metadata
+       */
+      logWarning("=== Refreshing index ===")
+      val tableName = table.qualifiedName
+      val indexes = spark.sql(s"SHOW INDEXES ON $tableName")
+      for (index <- indexes.select("Name").collect.map(_(0))) {
+        logWarning(s"Index: $index")
+        spark.sql(s"REFRESH INDEX $index ON $tableName")
       }
     }
+
     val streamDF = spark.readStream
       .schema(table.schema)
       .format("parquet")
