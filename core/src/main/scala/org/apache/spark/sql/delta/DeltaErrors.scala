@@ -17,10 +17,13 @@
 package org.apache.spark.sql.delta
 
 // scalastyle:off import.ordering.noEmptyLine
-import java.io.{FileNotFoundException, IOException}
-import java.util.ConcurrentModificationException
-
-import org.apache.spark.sql.delta.actions.{CommitInfo, Metadata, Protocol}
+import io.delta.sql.DeltaSparkSessionExtension
+import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.delta.actions.{CommitInfo, Metadata}
 import org.apache.spark.sql.delta.catalog.DeltaCatalog
 import org.apache.spark.sql.delta.constraints.Constraints
 import org.apache.spark.sql.delta.hooks.PostCommitHook
@@ -28,20 +31,14 @@ import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.spark.sql.delta.schema.{InvariantViolationException, SchemaUtils}
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.delta.util.JsonUtils
-import io.delta.sql.DeltaSparkSessionExtension
-import org.apache.hadoop.fs.Path
-
-import org.apache.spark.{SparkConf, SparkEnv}
-import org.apache.spark.sql.{AnalysisException, SparkSession}
-import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-import org.apache.spark.sql.catalyst.catalog.BucketSpec
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.{DataType, StructField, StructType}
+import org.apache.spark.sql.{AnalysisException, SparkSession}
+import org.apache.spark.{SparkConf, SparkEnv}
+
+import java.io.{FileNotFoundException, IOException}
+import java.util.ConcurrentModificationException
 
 
 trait DocsPath {
@@ -121,6 +118,14 @@ object DeltaErrors
        |useful in recomputing the state of the table. However this might cause other checkpoints to
        |get deleted based on retention settings.
      """.stripMargin
+
+  /**
+   * We have plans to support more column mapping modes, but they are not implemented yet,
+   * so we error for now to be forward compatible with tables created in the future.
+   */
+  def unsupportedColumnMappingMode(mode: String): Throwable =
+    new ColumnMappingUnsupportedException(s"The column mapping mode `$mode` is " +
+      s"not supported for this Delta version. Please upgrade if you want to use this mode.")
 
   def deltaSourceIgnoreDeleteError(version: Long, removedFile: String): Throwable = {
     new UnsupportedOperationException(
@@ -1400,3 +1405,10 @@ class MetadataMismatchErrorBuilder {
     throw new AnalysisException(bits.mkString("\n"))
   }
 }
+
+
+/** Errors thrown around column mapping. */
+class ColumnMappingUnsupportedException(msg: String)
+  extends UnsupportedOperationException(msg)
+case class ColumnMappingException(msg: String, mode: DeltaColumnMappingMode)
+  extends AnalysisException(msg)

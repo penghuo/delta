@@ -18,7 +18,6 @@ package org.apache.spark.sql.delta.commands
 
 // scalastyle:off import.ordering.noEmptyLine
 import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.CannotReplaceMissingTableException
 import org.apache.spark.sql.catalyst.catalog.{CatalogTable, CatalogTableType}
 import org.apache.spark.sql.catalyst.expressions.Attribute
@@ -31,8 +30,9 @@ import org.apache.spark.sql.delta.schema.SchemaUtils
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.delta.util.{DeltaFileOperations, SerializableFileStatus}
 import org.apache.spark.sql.execution.command.RunnableCommand
-import org.apache.spark.sql.functions.input_file_name
+import org.apache.spark.sql.functions.{input_file_name, to_json}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{DataFrame, _}
 import org.apache.spark.util.SerializableConfiguration
 
 import java.io.Closeable
@@ -195,10 +195,7 @@ case class CreateDeltaTableCommand(
 
             val convertTarget = ConvertTarget(table, tableLocation, Map.empty[String, String])
             if ("false".equalsIgnoreCase(table.properties.getOrElse("auto_refresh", "false"))) {
-              logWarning(s"one time refresh")
-              deltaLog.withNewTransaction { t =>
-                performConvert(sparkSession, t, convertTarget, Option.empty)
-              }
+              logError(s"one time refresh is not supported")
             } else {
               logWarning(s"auto refresh")
               autoRefresh(sparkSession, deltaLog, table, convertTarget)
@@ -465,25 +462,19 @@ case class CreateDeltaTableCommand(
     def myFunc(batchDF: DataFrame, batchID: Long): Unit = {
         deltaLog.withNewTransaction { txn => {
           logWarning(s"=== Refresh with files ===")
-          val paths = batchDF.collect().map(row => {
-            val path = row(0).toString
-            logWarning(s"New file: $path")
-            new Path(path)
-          })
-          performConvert(spark, txn, convertProperties, Option(paths))
+          performConvert(spark, txn, convertProperties, batchDF)
         }
       }
-
       /**
        * TODO: refresh all index/MV in current Delta table metadata
        */
-      logWarning("=== Refreshing index ===")
-      val tableName = table.qualifiedName
-      val indexes = spark.sql(s"SHOW INDEXES ON $tableName")
-      for (index <- indexes.select("Name").collect.map(_(0))) {
-        logWarning(s"Index: $index")
-        spark.sql(s"REFRESH INDEX $index ON $tableName")
-      }
+//      logWarning("=== Refreshing index ===")
+//      val tableName = table.qualifiedName
+//      val indexes = spark.sql(s"SHOW INDEXES ON $tableName")
+//      for (index <- indexes.select("Name").collect.map(_(0))) {
+//        logWarning(s"Index: $index")
+//        spark.sql(s"REFRESH INDEX $index ON $tableName")
+//      }
     }
 
     val streamDF = spark.readStream
@@ -492,7 +483,6 @@ case class CreateDeltaTableCommand(
       .option("path", convertProperties.targetDir.toString)
       .load()
     streamDF
-      .select(input_file_name())
       .writeStream
       .foreachBatch(myFunc _)
       .start()
@@ -503,17 +493,20 @@ case class CreateDeltaTableCommand(
    * entire list of files.
    */
   protected def createDeltaActions(
-    spark: SparkSession,
-    manifest: FileManifest,
+    df: DataFrame,
     txn: OptimisticTransaction,
     fs: FileSystem
   ): Iterator[AddFile] = {
-    val statsBatchSize =
-      conf.getConf(DeltaSQLConf.DELTA_IMPORT_BATCH_SIZE_STATS_COLLECTION)
-    manifest.getFiles.grouped(statsBatchSize).flatMap { batch =>
-      val adds = batch.map(createAddFile(_, txn.deltaLog.dataPath, fs))
-      adds.toIterator
-    }
+    val filesWithStats = df.groupBy(input_file_name())
+      .agg(to_json(txn.snapshot.statsCollector))
+    filesWithStats.collect().iterator.map { row => {
+      val fileName = row.getString(0)
+      logWarning(s"New file: $fileName")
+      val addFile = createAddFile(
+        SerializableFileStatus.fromStatus(fs.getFileStatus(new Path(fileName))),
+        txn.deltaLog.dataPath, fs)
+      addFile.copy(stats = row.getString(1))
+    }}
   }
 
   /**
@@ -528,7 +521,7 @@ case class CreateDeltaTableCommand(
     spark: SparkSession,
     txn: OptimisticTransaction,
     convertProperties: ConvertTarget,
-    files: Option[Array[Path]]
+    df: DataFrame
   ): Seq[Row] =
     recordDeltaOperation(txn.deltaLog, "delta.convert") {
 
@@ -541,21 +534,11 @@ case class CreateDeltaTableCommand(
       if (!fs.exists(qualifiedPath)) {
         throw DeltaErrors.pathNotExistsException(qualifiedDir)
       }
-      val serializableConfiguration =
-        new SerializableConfiguration(sessionHadoopConf)
-
-      val manifest = files.map(new ProvidedFileManifest(qualifiedDir, fs, _))
-        .getOrElse(new ManualListingFileManifest(spark, qualifiedDir, serializableConfiguration))
 
       try {
-        val initialList = manifest.getFiles
-        if (!initialList.hasNext) {
-          throw DeltaErrors.emptyDirectoryException(qualifiedDir)
-        }
+        val numFiles = 0
 
-        val numFiles = initialList.size
-
-        val addFilesIter = createDeltaActions(spark, manifest, txn, fs)
+        val addFilesIter = createDeltaActions(df, txn, fs)
         val metrics = Map[String, String](
           "numConvertedFiles" -> numFiles.toString
         )
@@ -564,12 +547,12 @@ case class CreateDeltaTableCommand(
           spark,
           txn,
           Iterator.single(txn.protocol) ++ addFilesIter,
-          getOperation(numFiles, convertProperties),
+          getOperation(0, convertProperties),
           getContext,
           metrics
         )
       } finally {
-        manifest.close()
+        // do nothing
       }
 
       Seq.empty[Row]

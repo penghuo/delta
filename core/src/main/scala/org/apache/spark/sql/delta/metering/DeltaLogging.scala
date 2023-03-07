@@ -106,4 +106,14 @@ trait DeltaLogging
           thunk
     }
   }
+
+  protected def recordFrameProfile[T](group: String, name: String)(thunk: => T): T = {
+    // future work to capture runtime information ...
+    thunk
+  }
+
+  protected def withDmqTag[T](thunk: => T): T = {
+    thunk
+  }
+
 }

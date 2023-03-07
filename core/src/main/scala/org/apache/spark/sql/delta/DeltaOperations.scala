@@ -16,14 +16,11 @@
 
 package org.apache.spark.sql.delta
 
-import org.apache.spark.sql.delta.actions.{Metadata, Protocol}
-import org.apache.spark.sql.delta.constraints.Constraint
-import org.apache.spark.sql.delta.util.JsonUtils
-
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.DeltaMergeIntoClause
+import org.apache.spark.sql.delta.actions.{Metadata, Protocol}
+import org.apache.spark.sql.delta.util.JsonUtils
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.{StructField, StructType}
@@ -316,6 +313,11 @@ object DeltaOperations {
     }
   }
 
+  /** Recorded when recomputing stats on the table. */
+  case class ComputeStats(predicate: Seq[String]) extends Operation("COMPUTE STATS") {
+    override val parameters: Map[String, Any] = Map(
+      "predicate" -> JsonUtils.toJson(predicate))
+  }
 
   private def structFieldToMap(colPath: Seq[String], field: StructField): Map[String, Any] = {
     Map(

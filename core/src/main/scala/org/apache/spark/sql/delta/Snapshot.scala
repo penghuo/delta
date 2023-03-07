@@ -18,9 +18,7 @@ package org.apache.spark.sql.delta
 
 // scalastyle:off import.ordering.noEmptyLine
 import java.net.URI
-
 import scala.collection.mutable
-
 import org.apache.spark.sql.delta.actions._
 import org.apache.spark.sql.delta.actions.Action.logSchema
 import org.apache.spark.sql.delta.metering.DeltaLogging
@@ -28,9 +26,9 @@ import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.delta.util.StateCache
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path}
-
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.apache.spark.sql.delta.stats.{DataSkippingReader, StatisticsCollection}
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelation}
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions._
@@ -63,6 +61,8 @@ class Snapshot(
   extends StateCache
   with PartitionFiltering
   with DeltaFileFormat
+  with StatisticsCollection
+  with DataSkippingReader
   with DeltaLogging {
 
   import Snapshot._
@@ -71,6 +71,8 @@ class Snapshot(
 
   protected def spark = SparkSession.active
 
+  /** Snapshot to scan by the DeltaScanGenerator for metadata query optimizations */
+  override val snapshotToScan: Snapshot = this
 
   protected def getNumPartitions: Int = {
     spark.sessionState.conf.getConf(DeltaSQLConf.DELTA_SNAPSHOT_PARTITIONS)
@@ -205,6 +207,9 @@ class Snapshot(
 
   /** Returns the schema of the table. */
   def schema: StructType = metadata.schema
+
+  /** Returns the data schema of the table, used for reading stats */
+  def tableDataSchema: StructType = metadata.dataSchema
 
   /** Returns the data schema of the table, the schema of the columns written out to file. */
   def dataSchema: StructType = metadata.dataSchema
