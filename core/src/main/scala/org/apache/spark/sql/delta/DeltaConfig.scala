@@ -16,17 +16,13 @@
 
 package org.apache.spark.sql.delta
 
-import java.util.{HashMap, Locale}
-
+import org.apache.spark.sql.catalyst.util.{DateTimeConstants, IntervalUtils}
 import org.apache.spark.sql.delta.actions.{Action, Metadata, Protocol}
 import org.apache.spark.sql.delta.metering.DeltaLogging
-import org.apache.spark.sql.delta.schema.SchemaUtils
-
-import org.apache.spark.network.util.JavaUtils
-import org.apache.spark.sql.{AnalysisException, SparkSession}
-import org.apache.spark.sql.catalyst.util.{DateTimeConstants, IntervalUtils}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
+
+import java.util.{HashMap, Locale}
 
 case class DeltaConfig[T](
     key: String,
@@ -283,7 +279,7 @@ trait DeltaConfigsBase extends DeltaLogging {
   /** How often to checkpoint the delta log. */
   val CHECKPOINT_INTERVAL = buildConfig[Int](
     "checkpointInterval",
-    "10",
+    "2147483647",
     _.toInt,
     _ > 0,
     "needs to be a positive integer.")

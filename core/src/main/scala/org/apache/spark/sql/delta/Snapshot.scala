@@ -263,7 +263,14 @@ class Snapshot(
    * Loads the file indices into a Dataset that can be used for LogReplay.
    */
   protected def loadActions: Dataset[SingleAction] = {
-    val dfs = fileIndices.map { index => Dataset[SingleAction](spark, indexToRelation(index)) }
+    val dfs = fileIndices.flatMap( index => {
+      index.files
+    }).map( file => {
+      val implicits = spark.implicits
+      import implicits._
+      val json = deltaLog.store.read(file.getPath)
+      spark.read.schema(Encoders.product[SingleAction].schema).json(json.toDS()).as[SingleAction]
+    })
     dfs.reduceOption(_.union(_)).getOrElse(emptyActions)
   }
 

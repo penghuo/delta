@@ -41,7 +41,7 @@ class DelegatingLogStore(hadoopConf: Configuration)
   // shared DeltaLog instances.
   private val schemeToLogStoreMap = mutable.Map.empty[String, LogStore]
 
-  private lazy val defaultLogStore = createLogStore(DelegatingLogStore.defaultHDFSLogStoreClassName)
+  private lazy val defaultLogStore = createLogStore(DelegatingLogStore.defaultOSStoreClassName)
 
   // Creates a LogStore with given LogStore class name.
   private def createLogStore(className: String): LogStore = {
@@ -119,6 +119,7 @@ object DelegatingLogStore {
   val defaultS3LogStoreClassName = classOf[S3SingleDriverLogStore].getName
   val defaultAzureLogStoreClassName = classOf[AzureLogStore].getName
   val defaultHDFSLogStoreClassName = classOf[HDFSLogStore].getName
+  val defaultOSStoreClassName = classOf[OpenSearchLogStore].getName
 
   // Supported schemes with default.
   val s3Schemes = Set("s3", "s3a", "s3n")
