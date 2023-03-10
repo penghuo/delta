@@ -42,7 +42,7 @@ trait DeltaSQLConfBase {
     buildConf("commitInfo.enabled")
       .doc("Whether to log commit information into the Delta log.")
       .booleanConf
-      .createWithDefault(true)
+      .createWithDefault(false)
 
   val DELTA_COMMIT_LOCK_ENABLED =
     buildConf("commitLock.enabled")

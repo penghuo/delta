@@ -17,12 +17,10 @@
 package org.apache.spark.sql.delta.commands
 
 // scalastyle:off import.ordering.noEmptyLine
+import org.apache.spark.sql._
 import org.apache.spark.sql.delta._
 import org.apache.spark.sql.delta.actions._
 import org.apache.spark.sql.delta.schema.ImplicitMetadataOperation
-
-import org.apache.spark.sql._
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 
 /**
@@ -99,10 +97,11 @@ case class WriteIntoDelta(
       None
     }
 
-    if (txn.readVersion < 0) {
-      // Initialize the log path
-      deltaLog.fs.mkdirs(deltaLog.logPath)
-    }
+// ignore create folder.
+//    if (txn.readVersion < 0) {
+//      // Initialize the log path
+//      deltaLog.fs.mkdirs(deltaLog.logPath)
+//    }
 
     val newFiles = txn.writeFiles(data, Some(options))
     val addFiles = newFiles.collect { case a: AddFile => a }

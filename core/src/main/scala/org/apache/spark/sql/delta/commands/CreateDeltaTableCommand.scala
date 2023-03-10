@@ -546,7 +546,7 @@ case class CreateDeltaTableCommand(
         commitLarge(
           spark,
           txn,
-          Iterator.single(txn.protocol) ++ addFilesIter,
+          addFilesIter,
           getOperation(0, convertProperties),
           getContext,
           metrics

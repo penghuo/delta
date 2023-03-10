@@ -17,15 +17,15 @@
 package org.apache.spark.sql.delta
 
 // scalastyle:off import.ordering.noEmptyLine
-import java.io.{File, IOException}
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.ReentrantLock
-
-import scala.concurrent.Future
-import scala.util.Try
-import scala.util.control.NonFatal
-
 import com.databricks.spark.util.TagDefinitions._
+import com.google.common.cache.{CacheBuilder, RemovalNotification}
+import org.apache.hadoop.fs.Path
+import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.catalyst.analysis.{Resolver, UnresolvedAttribute}
+import org.apache.spark.sql.catalyst.catalog.{BucketSpec, CatalogTable}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, Cast, Expression, Literal}
+import org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper
 import org.apache.spark.sql.delta.actions._
 import org.apache.spark.sql.delta.commands.WriteIntoDelta
 import org.apache.spark.sql.delta.files.{TahoeBatchFileIndex, TahoeLogFileIndex}
@@ -33,20 +33,18 @@ import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.spark.sql.delta.schema.SchemaUtils
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
 import org.apache.spark.sql.delta.storage.LogStoreProvider
-import com.google.common.cache.{CacheBuilder, RemovalNotification}
-import org.apache.hadoop.fs.Path
-
-import org.apache.spark.sql._
-import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.analysis.{Resolver, UnresolvedAttribute}
-import org.apache.spark.sql.catalyst.catalog.{BucketSpec, CatalogTable}
-import org.apache.spark.sql.catalyst.expressions.{And, Attribute, Cast, Expression, Literal}
-import org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources.{BaseRelation, InsertableRelation}
 import org.apache.spark.sql.types.{StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.util.{Clock, SystemClock}
+
+import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import scala.concurrent.Future
+import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Used to query the current state of the log as well as modify it by adding
@@ -285,11 +283,12 @@ class DeltaLog private(
 
   /** Creates the log directory if it does not exist. */
   def ensureLogDirectoryExist(): Unit = {
-    if (!fs.exists(logPath)) {
-      if (!fs.mkdirs(logPath)) {
-        throw new IOException(s"Cannot create $logPath")
-      }
-    }
+// use opensearch, not dir required.
+//    if (!fs.exists(logPath)) {
+//      if (!fs.mkdirs(logPath)) {
+//        throw new IOException(s"Cannot create $logPath")
+//      }
+//    }
   }
 
   /* ------------  *

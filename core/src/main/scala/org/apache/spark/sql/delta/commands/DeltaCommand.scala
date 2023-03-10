@@ -16,29 +16,25 @@
 
 package org.apache.spark.sql.delta.commands
 
-import java.net.URI
-import java.util.concurrent.TimeUnit.NANOSECONDS
-
-import scala.collection.mutable
-import scala.util.control.NonFatal
-
-import org.apache.spark.sql.delta.{CommitStats, DeltaErrors, DeltaLog, DeltaOperations, OptimisticTransaction, Serializable, Snapshot}
-import org.apache.spark.sql.delta.actions._
-import org.apache.spark.sql.delta.files.TahoeBatchFileIndex
-import org.apache.spark.sql.delta.metering.DeltaLogging
-import org.apache.spark.sql.delta.sources.{DeltaSourceUtils, DeltaSQLConf}
-import org.apache.spark.sql.delta.util.DeltaFileOperations
-import org.apache.spark.sql.delta.util.FileNames.deltaFile
 import org.apache.hadoop.fs.Path
-
-import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.{Analyzer, EliminateSubqueryAliases, NoSuchTableException, UnresolvedAttribute, UnresolvedRelation}
 import org.apache.spark.sql.catalyst.expressions.{Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.delta.actions._
+import org.apache.spark.sql.delta.files.TahoeBatchFileIndex
+import org.apache.spark.sql.delta.metering.DeltaLogging
+import org.apache.spark.sql.delta.sources.{DeltaSQLConf, DeltaSourceUtils}
+import org.apache.spark.sql.delta.util.DeltaFileOperations
+import org.apache.spark.sql.delta.util.FileNames.deltaFile
+import org.apache.spark.sql.delta._
 import org.apache.spark.sql.execution.datasources.{HadoopFsRelation, LogicalRelation}
+import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.util.Utils
+
+import java.util.concurrent.TimeUnit.NANOSECONDS
+import scala.util.control.NonFatal
 
 /**
  * Helper trait for all delta commands.
@@ -234,12 +230,13 @@ trait DeltaCommand extends DeltaLogging {
 
     logInfo(s"Committed delta #$attemptVersion to ${deltaLog.logPath}. Wrote $commitSize actions.")
 
-    try {
-      deltaLog.checkpoint(currentSnapshot)
-    } catch {
-      case e: IllegalStateException =>
-        logWarning("Failed to checkpoint table state.", e)
-    }
+    // disable checkpoint
+//    try {
+//      deltaLog.checkpoint(currentSnapshot)
+//    } catch {
+//      case e: IllegalStateException =>
+//        logWarning("Failed to checkpoint table state.", e)
+//    }
   }
 
   /**
@@ -259,30 +256,30 @@ trait DeltaCommand extends DeltaLogging {
       context: Map[String, String],
       metrics: Map[String, String]): Long = {
     val commitStartNano = System.nanoTime()
-    val attemptVersion = txn.readVersion + 1
+    var attemptVersion = txn.readVersion
     try {
       val metadata = txn.metadata
       val deltaLog = txn.deltaLog
 
-      val commitInfo = CommitInfo(
-        time = txn.clock.getTimeMillis(),
-        operation = op.name,
-        operationParameters = op.jsonEncodedValues,
-        context,
-        readVersion = Some(txn.readVersion),
-        isolationLevel = Some(Serializable.toString),
-        isBlindAppend = Some(false),
-        Some(metrics),
-        userMetadata = txn.getUserMetadata(op))
-
-      val extraActions = Seq(commitInfo, metadata)
+//      val commitInfo = CommitInfo(
+//        time = txn.clock.getTimeMillis(),
+//        operation = op.name,
+//        operationParameters = op.jsonEncodedValues,
+//        context,
+//        readVersion = Some(txn.readVersion),
+//        isolationLevel = Some(Serializable.toString),
+//        isBlindAppend = Some(false),
+//        Some(metrics),
+//        userMetadata = txn.getUserMetadata(op))
+//
+//      val extraActions = Seq(commitInfo, metadata)
       // We don't expect commits to have more than 2 billion actions
       var commitSize: Int = 0
       var numAbsolutePaths: Int = 0
       var numAddFiles: Int = 0
       var numRemoveFiles: Int = 0
       var bytesNew: Long = 0L
-      val allActions = (extraActions.toIterator ++ actions).map { action =>
+      val allActions = (actions).map { action =>
         commitSize += 1
         action match {
           case a: AddFile =>
@@ -295,10 +292,15 @@ trait DeltaCommand extends DeltaLogging {
         }
         action
       }
-      if (txn.readVersion < 0) {
-        deltaLog.fs.mkdirs(deltaLog.logPath)
-      }
-      deltaLog.store.write(deltaFile(deltaLog.logPath, attemptVersion), allActions.map(_.json))
+// ignore create folder.
+//      if (txn.readVersion < 0) {
+//        deltaLog.fs.mkdirs(deltaLog.logPath)
+//      }
+      allActions.foreach(action => {
+        attemptVersion = attemptVersion + 1
+        deltaLog.store
+          .write(deltaFile(deltaLog.logPath, attemptVersion), Seq(action.json).toIterator)
+      })
 
       spark.sessionState.conf.setConf(
         DeltaSQLConf.DELTA_LAST_COMMIT_VERSION_IN_SESSION,
@@ -321,7 +323,7 @@ trait DeltaCommand extends DeltaLogging {
         numCdcFiles = 0,
         cdcBytesNew = 0,
         protocol = postCommitSnapshot.protocol,
-        info = Option(commitInfo).map(_.copy(readVersion = None, isolationLevel = None)).orNull,
+        info = null,
         newMetadata = Some(metadata),
         numAbsolutePathsInAdd = numAbsolutePaths,
         numDistinctPartitionsInAdd = -1, // not tracking distinct partitions as of now
