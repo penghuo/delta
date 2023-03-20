@@ -468,13 +468,13 @@ case class CreateDeltaTableCommand(
       /**
        * TODO: refresh all index/MV in current Delta table metadata
        */
-//      logWarning("=== Refreshing index ===")
-//      val tableName = table.qualifiedName
-//      val indexes = spark.sql(s"SHOW INDEXES ON $tableName")
-//      for (index <- indexes.select("Name").collect.map(_(0))) {
-//        logWarning(s"Index: $index")
-//        spark.sql(s"REFRESH INDEX $index ON $tableName")
-//      }
+      logWarning("=== Refreshing index ===")
+      val tableName = table.qualifiedName
+      val indexes = spark.sql(s"SHOW INDEXES ON $tableName")
+      for (index <- indexes.select("Name").collect.map(_(0))) {
+        logWarning(s"Index: $index")
+        spark.sql(s"REFRESH INDEX $index ON $tableName")
+      }
     }
 
     val streamDF = spark.readStream
