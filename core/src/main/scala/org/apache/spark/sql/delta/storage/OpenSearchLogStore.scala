@@ -46,7 +46,10 @@ class OpenSearchLogStore(
 
   val INDEX_META_FIELD = Set("path", "version")
 
+  val OPENSEARCH_HOST = "spark.opensearch.host"
+  val OPENSEARCH_HOST_DEFAULT = "localhost"
 
+  val hostname = sparkConf.get(OPENSEARCH_HOST, OPENSEARCH_HOST_DEFAULT)
 
   /**
    * Load the given file and return a `Seq` of lines. The line break will be removed from each
@@ -55,7 +58,7 @@ class OpenSearchLogStore(
    */
   override def read(path: Path): Seq[String] = {
     val client = new RestHighLevelClient(RestClient
-      .builder(new HttpHost("localhost", 9200, "http")))
+      .builder(new HttpHost(hostname, 9200, "http")))
 
     try {
       val sourceBuilder = new SearchSourceBuilder
@@ -101,7 +104,7 @@ class OpenSearchLogStore(
    */
   override def write(path: Path, actions: Iterator[String], overwrite: Boolean): Unit = {
     val client = new RestHighLevelClient(RestClient
-      .builder(new HttpHost("localhost", 9200, "http")))
+      .builder(new HttpHost(hostname, 9200, "http")))
 
     try {
       val pathName = path.getName
@@ -128,7 +131,7 @@ class OpenSearchLogStore(
    */
   override def listFrom(path: Path): Iterator[FileStatus] = {
     val client = new RestHighLevelClient(RestClient
-      .builder(new HttpHost("localhost", 9200, "http")))
+      .builder(new HttpHost(hostname, 9200, "http")))
 
     try {
       val pathName = path.getName

@@ -16,15 +16,12 @@
 
 package org.apache.spark.sql.delta.storage
 
-import java.util.Locale
-
-import scala.collection.mutable
-
-import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, Path}
-
 import org.apache.spark.SparkEnv
+import org.apache.spark.sql.delta.metering.DeltaLogging
+
+import scala.collection.mutable
 
 
 /**
@@ -50,28 +47,28 @@ class DelegatingLogStore(hadoopConf: Configuration)
 
   // Create LogStore based on the scheme of `path`.
   private def schemeBasedLogStore(path: Path): LogStore = {
-    val store = Option(path.toUri.getScheme) match {
-      case Some(origScheme) =>
-        val scheme = origScheme.toLowerCase(Locale.ROOT)
-        this.synchronized {
-          if (schemeToLogStoreMap.contains(scheme)) {
-            schemeToLogStoreMap(scheme)
-          } else {
-            // Resolve LogStore class based on the following order:
-            // 1. Scheme conf if set.
-            // 2. Defaults for scheme if exists.
-            // 3. Default.
-            val logStoreClassNameOpt = sparkConf.getOption(LogStore.logStoreSchemeConfKey(scheme))
-              .orElse(DelegatingLogStore.getDefaultLogStoreClassName(scheme))
-            val logStore = logStoreClassNameOpt.map(createLogStore(_)).getOrElse(defaultLogStore)
-            schemeToLogStoreMap += scheme -> logStore
-            logInfo(s"LogStore ${logStore.getClass.getName} is used for scheme ${scheme}")
-            logStore
-          }
-        }
-      case _ => defaultLogStore
-    }
-    store
+//    val store = Option(path.toUri.getScheme) match {
+//      case Some(origScheme) =>
+//        val scheme = origScheme.toLowerCase(Locale.ROOT)
+//        this.synchronized {
+//          if (schemeToLogStoreMap.contains(scheme)) {
+//            schemeToLogStoreMap(scheme)
+//          } else {
+//            // Resolve LogStore class based on the following order:
+//            // 1. Scheme conf if set.
+//            // 2. Defaults for scheme if exists.
+//            // 3. Default.
+//            val logStoreClassNameOpt = sparkConf.getOption(LogStore.logStoreSchemeConfKey(scheme))
+//              .orElse(DelegatingLogStore.getDefaultLogStoreClassName(scheme))
+//            val logStore = logStoreClassNameOpt.map(createLogStore(_)).getOrElse(defaultLogStore)
+//            schemeToLogStoreMap += scheme -> logStore
+//            logInfo(s"LogStore ${logStore.getClass.getName} is used for scheme ${scheme}")
+//            logStore
+//          }
+//        }
+//      case _ => defaultLogStore
+//    }
+    defaultLogStore
   }
 
   def getDelegate(path: Path): LogStore = schemeBasedLogStore(path)
