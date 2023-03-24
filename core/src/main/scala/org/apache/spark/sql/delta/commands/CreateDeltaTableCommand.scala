@@ -102,7 +102,8 @@ case class CreateDeltaTableCommand(
 
     val isManagedTable = tableWithLocation.tableType == CatalogTableType.MANAGED
     val tableLocation = new Path(tableWithLocation.location)
-    val fs = tableLocation.getFileSystem(sparkSession.sessionState.newHadoopConf())
+//    val fs = FileSystem.get(tableLocation.toUri,
+//      sparkSession.sessionState.newHadoopConf(), "root")
     val deltaLog = DeltaLog.forTable(sparkSession, tableLocation)
     val options = new DeltaOptions(table.storage.properties, sparkSession.sessionState.conf)
     var result: Seq[Row] = Nil
@@ -117,9 +118,9 @@ case class CreateDeltaTableCommand(
           assert(!tableExists)
           // We may have failed a previous write. The retry should still succeed even if we have
           // garbage data
-          if (txn.readVersion > -1 || !fs.exists(deltaLog.logPath)) {
-            assertPathEmpty(sparkSession, tableWithLocation)
-          }
+//          if (txn.readVersion > -1 || !fs.exists(deltaLog.logPath)) {
+//            assertPathEmpty(sparkSession, tableWithLocation)
+//          }
         }
         // We are either appending/overwriting with saveAsTable or creating a new table with CTAS or
         // we are creating a table as part of a RunnableCommand
@@ -174,7 +175,7 @@ case class CreateDeltaTableCommand(
           val noExistingMetadata = (txn.readVersion == -1 || txn.metadata.schema.isEmpty) &&
             !table.properties.contains("external")
           if (noExistingMetadata) {
-            assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
+//            assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
             assertPathEmpty(sparkSession, tableWithLocation)
             // This is a user provided schema.
             // Doesn't come from a query, Follow nullability invariants.
@@ -184,7 +185,7 @@ case class CreateDeltaTableCommand(
             val op = getOperation(newMetadata, isManagedTable, None)
             txn.commit(Nil, op)
           } else {
-            assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
+//            assertTableSchemaDefined(fs, tableLocation, tableWithLocation, sparkSession)
             // This is a user provided schema.
             // Doesn't come from a query, Follow nullability invariants.
             val newMetadata = getProvidedMetadata(table, table.schema.json)
@@ -253,16 +254,6 @@ case class CreateDeltaTableCommand(
   private def assertPathEmpty(
       sparkSession: SparkSession,
       tableWithLocation: CatalogTable): Unit = {
-    val path = new Path(tableWithLocation.location)
-    val fs = path.getFileSystem(sparkSession.sessionState.newHadoopConf())
-    // Verify that the table location associated with CREATE TABLE doesn't have any data. Note that
-    // we intentionally diverge from this behavior w.r.t regular datasource tables (that silently
-    // overwrite any previous data)
-    if (fs.exists(path) && fs.listStatus(path).nonEmpty) {
-      throw new AnalysisException(s"Cannot create table ('${tableWithLocation.identifier}')." +
-        s" The associated location ('${tableWithLocation.location}') is not empty but " +
-        s"it's not a Delta table")
-    }
   }
 
   private def assertTableSchemaDefined(
@@ -270,21 +261,6 @@ case class CreateDeltaTableCommand(
       path: Path,
       table: CatalogTable,
       sparkSession: SparkSession): Unit = {
-    // Users did not specify the schema. We expect the schema exists in Delta.
-    if (table.schema.isEmpty) {
-      if (table.tableType == CatalogTableType.EXTERNAL) {
-        if (fs.exists(path) && fs.listStatus(path).nonEmpty) {
-          throw DeltaErrors.createExternalTableWithoutLogException(
-            path, table.identifier.quotedString, sparkSession)
-        } else {
-          throw DeltaErrors.createExternalTableWithoutSchemaException(
-            path, table.identifier.quotedString, sparkSession)
-        }
-      } else {
-        throw DeltaErrors.createManagedTableWithoutSchemaException(
-          table.identifier.quotedString, sparkSession)
-      }
-    }
   }
 
   /**
@@ -482,10 +458,16 @@ case class CreateDeltaTableCommand(
       .format("parquet")
       .option("path", convertProperties.targetDir.toString)
       .load()
-    streamDF
+
+    val query = streamDF
       .writeStream
+      .queryName("TableRefresh")
+      .outputMode("append")
       .foreachBatch(myFunc _)
       .start()
+    logWarning(s"=== Submit Table Refresh Job ===")
+    query.explain()
+    logWarning(s"=== Explain query ===")
   }
 
   /**

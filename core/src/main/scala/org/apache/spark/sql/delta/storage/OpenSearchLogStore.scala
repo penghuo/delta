@@ -71,7 +71,7 @@ class OpenSearchLogStore(
       searchRequest.indices(INDEX_NAME)
       searchRequest.source(sourceBuilder)
 
-      logWarning(s"===== read $path =====")
+      logInfo(s"===== read $path =====")
 
       val searchResponse = client.search(searchRequest, RequestOptions.DEFAULT)
 
@@ -112,14 +112,14 @@ class OpenSearchLogStore(
       val sourceActions = actions.map(_.replaceAll("^.|.$", "")).toList.mkString(",")
       val source = s"""{"path":"$path","version":"$version",$sourceActions}"""
 
-      logWarning(s"===== write $path =====")
-      logWarning(source)
+      logInfo(s"===== write $path =====")
+      logInfo(source)
 
       val request = new IndexRequest(INDEX_NAME).source(source, XContentType.JSON)
         .setRefreshPolicy(RefreshPolicy.IMMEDIATE)
       val response = client.index(request, RequestOptions.DEFAULT)
 
-      logWarning(s"===== write ${response.getResult} ======")
+      logInfo(s"===== write ${response.getResult} ======")
     } finally {
       client.close()
     }
@@ -148,7 +148,7 @@ class OpenSearchLogStore(
       searchRequest.indices(INDEX_NAME)
       searchRequest.source(sourceBuilder)
 
-      logWarning(s"===== listFrom $path =====")
+      logInfo(s"===== listFrom $path =====")
 
       val searchResponse = client.search(searchRequest, RequestOptions.DEFAULT)
 

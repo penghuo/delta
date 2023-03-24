@@ -18,10 +18,8 @@ package org.apache.spark.sql.delta
 
 import java.io.FileNotFoundException
 import java.util.UUID
-
 import scala.collection.mutable
 import scala.util.control.NonFatal
-
 import org.apache.spark.sql.delta.actions.{Metadata, SingleAction}
 import org.apache.spark.sql.delta.metering.DeltaLogging
 import org.apache.spark.sql.delta.sources.DeltaSQLConf
@@ -30,10 +28,9 @@ import org.apache.spark.sql.delta.util.DeltaFileOperations
 import org.apache.spark.sql.delta.util.FileNames._
 import org.apache.spark.sql.delta.util.JsonUtils
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.mapred.{JobConf, TaskAttemptContextImpl, TaskAttemptID}
 import org.apache.hadoop.mapreduce.{Job, TaskType}
-
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
@@ -301,7 +298,7 @@ object Checkpoints extends DeltaLogging {
           } catch {
             case e: org.apache.hadoop.fs.FileAlreadyExistsException if !useRename =>
               val p = new Path(writtenPath)
-              if (p.getFileSystem(serConf.value).exists(p)) {
+              if (FileSystem.get(p.toUri, serConf.value, "root").exists(p)) {
                 // The file has been written by a zombie task. We can just use this checkpoint file
                 // rather than failing a Delta commit.
               } else {
@@ -325,7 +322,7 @@ object Checkpoints extends DeltaLogging {
     if (useRename) {
       val src = new Path(writtenPath)
       val dest = new Path(path)
-      val fs = dest.getFileSystem(hadoopConf)
+      val fs = FileSystem.get(dest.toUri, hadoopConf, "root")
       var renameDone = false
       try {
         if (fs.rename(src, dest)) {
@@ -369,7 +366,7 @@ object Checkpoints extends DeltaLogging {
     } else {
       // When the schema is not available in the path, we check the file system scheme resolved from
       // the path.
-      path.getFileSystem(hadoopConf).getScheme.equalsIgnoreCase("gs")
+      FileSystem.get(path.toUri, hadoopConf, "root").getScheme.equalsIgnoreCase("gs")
     }
   }
 

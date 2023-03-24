@@ -19,7 +19,7 @@ package org.apache.spark.sql.delta
 // scalastyle:off import.ordering.noEmptyLine
 import com.databricks.spark.util.TagDefinitions._
 import com.google.common.cache.{CacheBuilder, RemovalNotification}
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.{Resolver, UnresolvedAttribute}
@@ -76,7 +76,8 @@ class DeltaLog private(
   /** Used to read and write physical log files and checkpoints. */
   lazy val store = createLogStore(spark)
   /** Direct access to the underlying storage system. */
-  private[delta] lazy val fs = logPath.getFileSystem(spark.sessionState.newHadoopConf)
+  private[delta] lazy val fs =
+    FileSystem.get(logPath.toUri, spark.sessionState.newHadoopConf(), "root")
 
   /** Use ReentrantLock to allow us to call `lockInterruptibly` */
   protected val deltaLogLock = new ReentrantLock()
@@ -452,7 +453,7 @@ object DeltaLog extends DeltaLogging {
   // TODO: Don't assume the data path here.
   def apply(spark: SparkSession, rawPath: Path, clock: Clock = new SystemClock): DeltaLog = {
     val hadoopConf = spark.sessionState.newHadoopConf()
-    val fs = rawPath.getFileSystem(hadoopConf)
+    val fs = FileSystem.get(rawPath.toUri, hadoopConf, "root")
     val path = fs.makeQualified(rawPath)
     // The following cases will still create a new ActionLog even if there is a cached
     // ActionLog using a different format path:
@@ -477,7 +478,7 @@ object DeltaLog extends DeltaLogging {
   def invalidateCache(spark: SparkSession, dataPath: Path): Unit = {
     try {
       val rawPath = new Path(dataPath, "_delta_log")
-      val fs = rawPath.getFileSystem(spark.sessionState.newHadoopConf())
+      val fs = FileSystem.get(rawPath.toUri, spark.sessionState.newHadoopConf(), "root")
       val path = fs.makeQualified(rawPath)
       deltaLogCache.invalidate(path)
     } catch {

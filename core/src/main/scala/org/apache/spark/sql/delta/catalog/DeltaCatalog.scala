@@ -16,6 +16,8 @@
 
 package org.apache.spark.sql.delta.catalog
 
+import org.apache.hadoop.fs.FileSystem
+
 import java.util
 import java.util.Locale
 
@@ -583,7 +585,7 @@ trait SupportsPathIdentifier extends TableCatalog { self: DeltaCatalog =>
   override def tableExists(ident: Identifier): Boolean = {
     if (isPathIdentifier(ident)) {
       val path = new Path(ident.name())
-      val fs = path.getFileSystem(spark.sessionState.newHadoopConf())
+      val fs = FileSystem.get(path.toUri, spark.sessionState.newHadoopConf(), "root")
       fs.exists(path) && fs.listStatus(path).nonEmpty
     } else {
       super.tableExists(ident)
